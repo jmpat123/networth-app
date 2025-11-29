@@ -8,6 +8,10 @@ ChartJS.register(ArcElement, Tooltip, Legend);
 function App() {
   const [totalNetWorth, setTotalNetWorth] = useState(null);
   const [loadingTotal, setLoadingTotal] = useState(false);
+
+  const [cryptoTotal, setCryptoTotal] = useState(0);
+  const [tradfiTotal, setTradfiTotal] = useState(0);
+
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
@@ -30,24 +34,29 @@ function App() {
 
   const backendUrl = 'http://localhost:4000';
 
+  // ===== FETCH NET WORTH SUMMARY FROM BACKEND =====
   const fetchTotal = async () => {
     try {
       setLoadingTotal(true);
       setError('');
-      const res = await fetch(`${backendUrl}/api/holdings/total`);
+      const res = await fetch(`${backendUrl}/api/networth/summary`);
       const data = await res.json();
+
       if (res.ok) {
-        setTotalNetWorth(data.totalNetWorthUsd);
+        setTotalNetWorth(data.totalNetWorthUsd ?? null);
+        setCryptoTotal(data.totalCryptoUsd ?? 0);
+        setTradfiTotal(data.totalTradfiUsd ?? 0);
       } else {
-        setError(data.error || 'Failed to fetch total net worth');
+        setError(data.error || 'Failed to fetch net worth summary');
       }
     } catch (e) {
-      setError('Network error while fetching total');
+      setError('Network error while fetching net worth summary');
     } finally {
       setLoadingTotal(false);
     }
   };
 
+  // ===== FETCH HOLDINGS LIST =====
   const fetchHoldings = async () => {
     try {
       setLoadingHoldings(true);
@@ -109,8 +118,32 @@ function App() {
     }
   };
 
-  // ===== PLAID FRONTEND LOGIC =====
+  // ===== DELETE HOLDING (MAINLY MANUAL) =====
+  const handleDeleteHolding = async (id) => {
+    const confirmed = window.confirm('Delete this holding?');
+    if (!confirmed) return;
 
+    try {
+      setError('');
+      const res = await fetch(`${backendUrl}/api/holdings/${id}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.error || 'Failed to delete holding');
+        return;
+      }
+
+      setMessage('Holding deleted');
+      fetchTotal();
+      fetchHoldings();
+    } catch (e) {
+      setError('Network error while deleting holding');
+    }
+  };
+
+  // ===== PLAID FRONTEND LOGIC =====
   const createLinkToken = async () => {
     try {
       setError('');
@@ -196,15 +229,6 @@ function App() {
   };
 
   // ===== CRYPTO VS TRADFI CHART DATA =====
-
-  const cryptoTotal = holdings
-    .filter((h) => h.asset_class === 'crypto')
-    .reduce((sum, h) => sum + Number(h.value_usd || 0), 0);
-
-  const tradfiTotal = holdings
-    .filter((h) => h.asset_class !== 'crypto')
-    .reduce((sum, h) => sum + Number(h.value_usd || 0), 0);
-
   const hasChartData = cryptoTotal + tradfiTotal > 0;
 
   const pieData = {
@@ -237,6 +261,18 @@ function App() {
     },
   };
 
+  // ===== LAST UPDATED TIMESTAMP (BASED ON HOLDINGS.as_of) =====
+  const lastUpdatedTimestamp = holdings.reduce((latest, h) => {
+    if (!h.as_of) return latest;
+    const t = new Date(h.as_of).getTime();
+    return t > latest ? t : latest;
+  }, 0);
+
+  const lastUpdatedLabel =
+    lastUpdatedTimestamp > 0
+      ? new Date(lastUpdatedTimestamp).toLocaleString()
+      : null;
+
   return (
     <div
       style={{
@@ -261,9 +297,20 @@ function App() {
         {loadingTotal ? (
           <p>Loading...</p>
         ) : totalNetWorth !== null ? (
-          <p style={{ fontSize: 24, fontWeight: 'bold' }}>
-            ${totalNetWorth.toLocaleString()}
-          </p>
+          <>
+            <p style={{ fontSize: 24, fontWeight: 'bold', marginBottom: 8 }}>
+              ${totalNetWorth.toLocaleString()}
+            </p>
+            <p style={{ fontSize: 14, color: '#555' }}>
+              <strong>Crypto:</strong> ${cryptoTotal.toLocaleString()} &nbsp;·&nbsp;
+              <strong>TradFi:</strong> ${tradfiTotal.toLocaleString()}
+            </p>
+            {lastUpdatedLabel && (
+              <p style={{ fontSize: 12, color: '#888', marginTop: 4 }}>
+                Last updated: {lastUpdatedLabel}
+              </p>
+            )}
+          </>
         ) : (
           <p>No data yet.</p>
         )}
@@ -303,7 +350,10 @@ function App() {
           {hasChartData && (
             <p style={{ marginTop: 8 }}>
               Crypto share:{' '}
-              {((cryptoTotal / (cryptoTotal + tradfiTotal)) * 100).toFixed(1)}%
+              {((cryptoTotal / (cryptoTotal + tradfiTotal || 1)) * 100).toFixed(
+                1
+              )}
+              %
             </p>
           )}
         </div>
@@ -441,37 +491,131 @@ function App() {
             >
               <thead>
                 <tr>
-                  <th style={{ borderBottom: '1px solid #ccc', textAlign: 'left' }}>Symbol</th>
-                  <th style={{ borderBottom: '1px solid #ccc', textAlign: 'right' }}>Quantity</th>
-                  <th style={{ borderBottom: '1px solid #ccc', textAlign: 'right' }}>Price (USD)</th>
-                  <th style={{ borderBottom: '1px solid #ccc', textAlign: 'right' }}>Value (USD)</th>
-                  <th style={{ borderBottom: '1px solid #ccc', textAlign: 'left' }}>Class</th>
-                  <th style={{ borderBottom: '1px solid #ccc', textAlign: 'left' }}>Account</th>
-                  <th style={{ borderBottom: '1px solid #ccc', textAlign: 'left' }}>Provider</th>
+                  <th
+                    style={{
+                      borderBottom: '1px solid #ccc',
+                      textAlign: 'left',
+                    }}
+                  >
+                    Symbol
+                  </th>
+                  <th
+                    style={{
+                      borderBottom: '1px solid #ccc',
+                      textAlign: 'right',
+                    }}
+                  >
+                    Quantity
+                  </th>
+                  <th
+                    style={{
+                      borderBottom: '1px solid #ccc',
+                      textAlign: 'right',
+                    }}
+                  >
+                    Price (USD)
+                  </th>
+                  <th
+                    style={{
+                      borderBottom: '1px solid #ccc',
+                      textAlign: 'right',
+                    }}
+                  >
+                    Value (USD)
+                  </th>
+                  <th
+                    style={{
+                      borderBottom: '1px solid #ccc',
+                      textAlign: 'left',
+                    }}
+                  >
+                    Class
+                  </th>
+                  <th
+                    style={{
+                      borderBottom: '1px solid #ccc',
+                      textAlign: 'left',
+                    }}
+                  >
+                    Account
+                  </th>
+                  <th
+                    style={{
+                      borderBottom: '1px solid #ccc',
+                      textAlign: 'left',
+                    }}
+                  >
+                    Provider
+                  </th>
+                  <th
+                    style={{
+                      borderBottom: '1px solid #ccc',
+                      textAlign: 'left',
+                    }}
+                  >
+                    Actions
+                  </th>
                 </tr>
               </thead>
               <tbody>
-                {holdings.map((h) => (
-                  <tr key={h.id}>
-                    <td style={{ borderBottom: '1px solid #eee' }}>{h.symbol}</td>
-                    <td style={{ borderBottom: '1px solid #eee', textAlign: 'right' }}>
-                      {Number(h.quantity).toLocaleString()}
-                    </td>
-                    <td style={{ borderBottom: '1px solid #eee', textAlign: 'right' }}>
-                      ${Number(h.price_usd).toLocaleString()}
-                    </td>
-                    <td style={{ borderBottom: '1px solid #eee', textAlign: 'right' }}>
-                      ${Number(h.value_usd).toLocaleString()}
-                    </td>
-                    <td style={{ borderBottom: '1px solid #eee' }}>{h.asset_class}</td>
-                    <td style={{ borderBottom: '1px solid #eee' }}>
-                      {h.accounts?.name || ''}
-                    </td>
-                    <td style={{ borderBottom: '1px solid #eee' }}>
-                      {h.accounts?.connections?.provider || ''}
-                    </td>
-                  </tr>
-                ))}
+                {holdings.map((h) => {
+                  const provider = h.accounts?.connections?.provider || '';
+                  const nickname =
+                    h.accounts?.connections?.nickname || '';
+                  const isManual = provider === 'manual';
+
+                  return (
+                    <tr key={h.id}>
+                      <td style={{ borderBottom: '1px solid #eee' }}>
+                        {h.symbol}
+                      </td>
+                      <td
+                        style={{
+                          borderBottom: '1px solid #eee',
+                          textAlign: 'right',
+                        }}
+                      >
+                        {Number(h.quantity).toLocaleString()}
+                      </td>
+                      <td
+                        style={{
+                          borderBottom: '1px solid #eee',
+                          textAlign: 'right',
+                        }}
+                      >
+                        ${Number(h.price_usd).toLocaleString()}
+                      </td>
+                      <td
+                        style={{
+                          borderBottom: '1px solid #eee',
+                          textAlign: 'right',
+                        }}
+                      >
+                        ${Number(h.value_usd).toLocaleString()}
+                      </td>
+                      <td style={{ borderBottom: '1px solid #eee' }}>
+                        {h.asset_class}
+                      </td>
+                      <td style={{ borderBottom: '1px solid #eee' }}>
+                        {h.accounts?.name || ''}
+                      </td>
+                      <td style={{ borderBottom: '1px solid #eee' }}>
+                        {provider}
+                        {nickname ? ` (${nickname})` : ''}
+                      </td>
+                      <td style={{ borderBottom: '1px solid #eee' }}>
+                        {isManual && (
+                          <button
+                            style={{ fontSize: 12 }}
+                            onClick={() => handleDeleteHolding(h.id)}
+                          >
+                            Delete
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -490,4 +634,3 @@ function App() {
 }
 
 export default App;
-
