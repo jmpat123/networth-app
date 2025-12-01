@@ -3,8 +3,6 @@ const express = require('express');
 const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
 const { Configuration, PlaidApi, PlaidEnvironments } = require('plaid');
-const snapshotsController = require('./controllers/snapshotsController.js');
-
 
 const app = express();
 app.use(cors());
@@ -389,24 +387,21 @@ app.get('/health', (req, res) => {
 // ====== MANUAL HOLDING ENTRY ======
 app.post('/api/holdings/manual', async (req, res) => {
   try {
-    const {
-      connectionName,
-      accountName,
-      symbol,
-      quantity,
-      priceUsd,
-      assetClass,
-      effectiveDate,   // <-- NEW
-    } = req.body;
+    const { connectionName, accountName, symbol, quantity, priceUsd, assetClass } = req.body;
+
+    if (!symbol || quantity == null || priceUsd == null || !assetClass) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
 
     const valueUsd = quantity * priceUsd;
 
+    // 1. Create connection
     const { data: connection, error: connError } = await supabase
       .from('connections')
       .insert({
         user_id: TEST_USER_ID,
         provider: 'manual',
-        identifier: connectionName || 'manual-connection',
+        identifier: connectionName || 'manual-connection'
       })
       .select('*')
       .single();
@@ -416,13 +411,14 @@ app.post('/api/holdings/manual', async (req, res) => {
       return res.status(500).json({ error: connError.message });
     }
 
+    // 2. Create account
     const { data: account, error: accError } = await supabase
       .from('accounts')
       .insert({
         connection_id: connection.id,
         name: accountName || 'Manual Account',
         type: 'manual',
-        currency: 'USD',
+        currency: 'USD'
       })
       .select('*')
       .single();
@@ -432,12 +428,8 @@ app.post('/api/holdings/manual', async (req, res) => {
       return res.status(500).json({ error: accError.message });
     }
 
+    // 3. Create holding
     const now = new Date().toISOString();
-
-    const effectiveDateForDb =
-      effectiveDate && effectiveDate.trim()
-        ? effectiveDate // "YYYY-MM-DD" from <input type="date">
-        : now.slice(0, 10); // fallback: today
 
     const { data: holding, error: holdError } = await supabase
       .from('holdings')
@@ -448,8 +440,7 @@ app.post('/api/holdings/manual', async (req, res) => {
         price_usd: priceUsd,
         value_usd: valueUsd,
         asset_class: assetClass,
-        as_of: now,
-        effective_date: effectiveDateForDb,   // <-- NEW COLUMN
+        as_of: now
       })
       .select('*')
       .single();
@@ -465,7 +456,6 @@ app.post('/api/holdings/manual', async (req, res) => {
     res.status(500).json({ error: 'Server error' });
   }
 });
-
 
 // ====== CALCULATE TOTAL NET WORTH ======
 app.get('/api/holdings/total', async (req, res) => {
@@ -779,9 +769,8 @@ app.get('/api/holdings/list', async (req, res) => {
 
 // ====== SNAPSHOTS: LIST FOR CURRENT USER ======
 // ===== SNAPSHOTS ROUTES (using controller) =====
-// ===== SNAPSHOTS ROUTES =====
-app.get('/api/snapshots', snapshotsController.getSnapshots);
-app.post('/api/snapshots/write', snapshotsController.writeSnapshot);
+app.get('/api/snapshots', getSnapshots);
+app.post('/api/snapshots/write', writeSnapshot);
 
 
 
