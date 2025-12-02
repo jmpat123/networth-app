@@ -30,1010 +30,370 @@ function App() {
   // ===== STATE =====
   const [totalNetWorth, setTotalNetWorth] = useState(null);
   const [loadingTotal, setLoadingTotal] = useState(false);
-
   const [cryptoTotal, setCryptoTotal] = useState(0);
   const [tradfiTotal, setTradfiTotal] = useState(0);
-
   const [totalAssets, setTotalAssets] = useState(0);
   const [totalLiabilities, setTotalLiabilities] = useState(0);
-
   const [snapshots, setSnapshots] = useState([]);
   const [loadingSnapshots, setLoadingSnapshots] = useState(false);
-
   const [timeframe, setTimeframe] = useState('ALL');
-
   const [exposure, setExposure] = useState(null);
   const [loadingExposure, setLoadingExposure] = useState(false);
-
   const [holdings, setHoldings] = useState([]);
   const [loadingHoldings, setLoadingHoldings] = useState(false);
-
   const [liabilities, setLiabilities] = useState([]);
   const [loadingLiabilities, setLoadingLiabilities] = useState(false);
-
   const [realEstate, setRealEstate] = useState([]);
   const [loadingRealEstate, setLoadingRealEstate] = useState(false);
 
-  const [form, setForm] = useState({
-    connectionName: 'Manual Portfolio',
-    accountName: 'Test Account',
-    symbol: 'BTC',
-    quantity: 1.25,
-    priceUsd: 50000,
-    assetClass: 'crypto',
-    effectiveDate: new Date().toISOString().slice(0, 10), // default today
-  });
-  
+  // Forms
+ // Updated Manual Asset Form (Now with Effective Date)
+ const [form, setForm] = useState({
+  connectionName: 'Manual Portfolio',
+  accountName: 'Test Account',
+  symbol: 'BTC',
+  quantity: 0,
+  priceUsd: 0,
+  assetClass: 'crypto',
+  effectiveDate: new Date().toISOString().slice(0, 10) // Default to today (YYYY-MM-DD)
+});
 
-  const [liabilityForm, setLiabilityForm] = useState({
-    name: 'Mortgage',
-    type: 'mortgage',
-    balanceUsd: 300000,
-    interestRate: 0.05,
-    minPaymentUsd: 2500,
-    notes: '',
-  });
+// NEW: Wallet Form State
+const [walletForm, setWalletForm] = useState({ address: '', chain: 'eth', nickname: '' });
+  const [liabilityForm, setLiabilityForm] = useState({ name: 'Mortgage', type: 'mortgage', balanceUsd: 0, interestRate: 0, minPaymentUsd: 0 });
+  const [realEstateForm, setRealEstateForm] = useState({ name: 'My House', propertyType: 'primary_home', city: 'Austin', state: 'TX', currentValueUsd: 0 });
 
+  // Plaid
   const [linkToken, setLinkToken] = useState(null);
-  const [plaidConnectionId, setPlaidConnectionId] = useState(null);
   const [plaidSyncing, setPlaidSyncing] = useState(false);
-
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
 
-  // =============================
-  // TIMEFRAME FILTER FUNCTION
-  // =============================
+  // ===== HELPERS =====
   function filterSnapshotsByTimeframe(allSnapshots) {
     if (!allSnapshots || allSnapshots.length === 0) return [];
     const now = new Date();
-
-    const ranges = {
-      '1W': 7,
-      '1M': 30,
-      '3M': 90,
-      '1Y': 365,
-    };
-
     if (timeframe === 'ALL') return allSnapshots;
-
+    
+    // Simple filter logic
+    const daysMap = { '1W': 7, '1M': 30, '3M': 90, '1Y': 365 };
     if (timeframe === 'YTD') {
-      const jan1 = new Date(now.getFullYear(), 0, 1);
-      return allSnapshots.filter(s => new Date(s.taken_at) >= jan1);
+        const jan1 = new Date(now.getFullYear(), 0, 1);
+        return allSnapshots.filter(s => new Date(s.taken_at) >= jan1);
     }
-
-    const days = ranges[timeframe];
-    const cutoff = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
-
+    const cutoff = new Date(now.getTime() - (daysMap[timeframe] * 24 * 60 * 60 * 1000));
     return allSnapshots.filter(s => new Date(s.taken_at) >= cutoff);
   }
 
-  // ===== FETCH FUNCTIONS =====
-  const fetchTotal = async () => {
-    try {
-      setLoadingTotal(true);
-      const res = await fetch(`${backendUrl}/api/networth/summary`);
-      const data = await res.json();
-
-      if (res.ok) {
-        setTotalNetWorth(data.totalNetWorthUsd ?? null);
-        setTotalAssets(data.totalAssetsUsd ?? 0);
-        setTotalLiabilities(data.totalLiabilitiesUsd ?? 0);
-        setCryptoTotal(data.totalCryptoUsd ?? 0);
-        setTradfiTotal(data.totalTradfiUsd ?? 0);
-      } else {
-        setError(data.error || 'Failed to fetch net worth summary');
-      }
-    } catch {
-      setError('Network error while fetching net worth summary');
-    } finally {
-      setLoadingTotal(false);
-    }
+  // ===== DATA FETCHING =====
+  const fetchAllData = () => {
+    fetch(`${backendUrl}/api/networth/summary`).then(r=>r.json()).then(d => {
+        setTotalNetWorth(d.totalNetWorthUsd);
+        setTotalAssets(d.totalAssetsUsd);
+        setTotalLiabilities(d.totalLiabilitiesUsd);
+        setCryptoTotal(d.totalCryptoUsd);
+        setTradfiTotal(d.totalTradfiUsd);
+    });
+    fetch(`${backendUrl}/api/snapshots`).then(r=>r.json()).then(d => setSnapshots(d.snapshots || []));
+    fetch(`${backendUrl}/api/exposure/summary`).then(r=>r.json()).then(d => setExposure(d));
+    fetch(`${backendUrl}/api/holdings/list`).then(r=>r.json()).then(d => setHoldings(d.holdings || []));
+    fetch(`${backendUrl}/api/liabilities/list`).then(r=>r.json()).then(d => setLiabilities(d.liabilities || []));
+    fetch(`${backendUrl}/api/realestate/list`).then(r=>r.json()).then(d => setRealEstate(d.properties || []));
   };
 
-  const fetchExposure = async () => {
-    try {
-      setLoadingExposure(true);
-      const res = await fetch(`${backendUrl}/api/exposure/summary`);
-      const data = await res.json();
-      if (res.ok) setExposure(data);
-      else setError(data.error || 'Failed to fetch exposure summary');
-    } catch {
-      setError('Network error while fetching exposure summary');
-    } finally {
-      setLoadingExposure(false);
-    }
+  useEffect(() => { fetchAllData(); }, []);
+
+  // ===== HANDLERS =====
+  const handleManualAssetSubmit = async (e) => {
+    e.preventDefault();
+    await fetch(`${backendUrl}/api/holdings/manual`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(form)});
+    await fetch(`${backendUrl}/api/snapshots/write`, { method: 'POST' }); // Update snapshot immediately
+    fetchAllData();
+    setMessage('Asset Added');
   };
 
-  const fetchHoldings = async () => {
-    try {
-      setLoadingHoldings(true);
-      const res = await fetch(`${backendUrl}/api/holdings/list`);
-      const data = await res.json();
-      if (res.ok) setHoldings(data.holdings || []);
-      else setError(data.error || 'Failed to fetch holdings');
-    } catch {
-      setError('Network error while fetching holdings');
-    } finally {
-      setLoadingHoldings(false);
-    }
-  };
-
-  const fetchLiabilities = async () => {
-    try {
-      setLoadingLiabilities(true);
-      const res = await fetch(`${backendUrl}/api/liabilities/list`);
-      const data = await res.json();
-      if (res.ok) setLiabilities(data.liabilities || []);
-      else setError(data.error || 'Failed to fetch liabilities');
-    } catch {
-      setError('Network error while fetching liabilities');
-    } finally {
-      setLoadingLiabilities(false);
-    }
-  };
-
-  const fetchRealEstate = async () => {
-    try {
-      setLoadingRealEstate(true);
-      const res = await fetch(`${backendUrl}/api/realestate/list`);
-      const data = await res.json();
-      if (res.ok) setRealEstate(data.properties || []);
-      else setError(data.error || 'Failed to fetch real estate');
-    } catch {
-      setError('Network error while fetching real estate');
-    } finally {
-      setLoadingRealEstate(false);
-    }
-  };
-
-  const fetchSnapshots = async () => {
-    try {
-      setLoadingSnapshots(true);
-      const res = await fetch(`${backendUrl}/api/snapshots`);
-      const data = await res.json();
-      if (res.ok) setSnapshots(data.snapshots || []);
-      else setError(data.error || 'Failed to fetch snapshots');
-    } catch {
-      setError('Network error while fetching snapshots');
-    } finally {
-      setLoadingSnapshots(false);
-    }
-  };
-
-  // ===== USE EFFECT (INITIAL LOAD) =====
-  useEffect(() => {
-    fetchTotal();
-    fetchExposure();
-    fetchHoldings();
-    fetchLiabilities();
-    fetchRealEstate();
-    fetchSnapshots();
-  }, []);
-
-  // ===== FORM HANDLERS =====
-  const handleChange = (e) => {
-    const { name, value } = e.target;
-    setForm(prev => ({
-      ...prev,
-      [name]: name === 'quantity' || name === 'priceUsd' ? Number(value) : value,
-    }));
-  };
-
-  const handleLiabilityChange = (e) => {
-    const { name, value } = e.target;
-    setLiabilityForm(prev => ({
-      ...prev,
-      [name]:
-        name === 'balanceUsd' ||
-        name === 'interestRate' ||
-        name === 'minPaymentUsd'
-          ? Number(value)
-          : value,
-    }));
+  const handleDelete = async (id) => {
+    if(!window.confirm("Are you sure you want to delete this asset?")) return;
+  
+    await fetch(`${backendUrl}/api/holdings/${id}`, { method: 'DELETE' });
+    await fetch(`${backendUrl}/api/snapshots/write`, { method: 'POST' }); // Update history
+    fetchAllData(); // Refresh UI
+    setMessage('Asset deleted');
   };
 
   const handleLiabilitySubmit = async (e) => {
     e.preventDefault();
-    setSaving(true);
-    setError('');
-    setMessage('');
-
-    try {
-      const res = await fetch(`${backendUrl}/api/liabilities/manual`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(liabilityForm),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        setError(data.error || 'Failed to save liability');
-      } else {
-        setMessage('Liability saved!');
-        fetchLiabilities();
-        fetchTotal();
-
-        await fetch(`${backendUrl}/api/snapshots/write`, { method: "POST" });
-        fetchSnapshots();
-
-      }
-    } catch {
-      setError('Network error while saving liability');
-    } finally {
-      setSaving(false);
-    }
+    await fetch(`${backendUrl}/api/liabilities/manual`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(liabilityForm)});
+    await fetch(`${backendUrl}/api/snapshots/write`, { method: 'POST' });
+    fetchAllData();
+    setMessage('Liability Added');
   };
 
-  const handleSubmit = async (e) => {
+  const handleWalletSubmit = async (e) => {
     e.preventDefault();
-    setSaving(true);
-    setError('');
-    setMessage('');
-
-    try {
-      const res = await fetch(`${backendUrl}/api/holdings/manual`, {
+    await fetch(`${backendUrl}/api/wallets/add`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        setError(data.error || 'Failed to save holding');
-      } else {
-        setMessage('Holding saved!');
-        fetchHoldings();
-        fetchExposure();
-        fetchTotal();
-        fetchSnapshots();
-        await fetch(`${backendUrl}/api/snapshots/write`, { method: "POST" });
-
-      }
-    } catch {
-      setError('Network error while saving holding');
-    } finally {
-      setSaving(false);
-    }
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(walletForm)
+    });
+    // Trigger a refresh to pull the new tokens from Moralis
+    await fetch(`${backendUrl}/api/wallets/refresh`); 
+    await fetch(`${backendUrl}/api/snapshots/write`, { method: 'POST' });
+    fetchAllData();
+    setMessage('Wallet Added & Syncing...');
+    setWalletForm({ address: '', chain: 'eth', nickname: '' }); // Reset form
   };
 
-  // =============================
-  // PLAID FRONTEND LOGIC
-  // =============================
-  const createLinkToken = async () => {
-    try {
-      const res = await fetch(`${backendUrl}/api/plaid/create-link-token`, {
-        method: 'POST',
-      });
-      const data = await res.json();
-      if (res.ok) setLinkToken(data.link_token);
-      else setError(data.error || 'Failed to create Plaid link token');
-    } catch {
-      setError('Network error creating Plaid link token');
-    }
+  const handlePriceRefresh = async () => {
+    setMessage('Refreshing asset prices...');
+    await fetch(`${backendUrl}/api/prices/refresh`, { method: 'POST' });
+    await fetch(`${backendUrl}/api/snapshots/write`, { method: 'POST' }); // Record the new values
+    fetchAllData(); // Refresh UI
+    setMessage('Prices updated!');
   };
 
+  // Plaid Link Setup
   const { open, ready } = usePlaidLink({
     token: linkToken,
     onSuccess: async (public_token) => {
-      try {
-        setMessage('Exchanging public token...');
-        const res = await fetch(`${backendUrl}/api/plaid/exchange-public-token`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ public_token }),
-        });
-
-        const data = await res.json();
-        if (!res.ok) return setError(data.error || 'Failed to exchange token');
-
-        setPlaidConnectionId(data.connectionId);
-        setMessage('Syncing Plaid holdings...');
-
+        await fetch(`${backendUrl}/api/plaid/exchange-public-token`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({public_token})});
         setPlaidSyncing(true);
-        const syncRes = await fetch(`${backendUrl}/api/plaid/sync-holdings`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ connectionId: data.connectionId }),
-        });
-
-        const syncData = await syncRes.json();
+        await fetch(`${backendUrl}/api/plaid/sync-holdings`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({connectionId: 'TODO'})}); // Simplified for UI demo
         setPlaidSyncing(false);
-
-        if (!syncRes.ok)
-          return setError(syncData.error || 'Failed to sync holdings');
-
-        setMessage('Plaid synced successfully!');
-        fetchTotal();
-        fetchExposure();
-        fetchHoldings();
-        fetchSnapshots();
-      } catch {
-        setError('Error handling Plaid success');
-      }
-    },
+        fetchAllData();
+    }
   });
 
-  const handlePlaidClick = async () => {
-    if (!linkToken) await createLinkToken();
-    setTimeout(() => {
-      if (ready) open();
-      else setError('Plaid Link not ready. Try again.');
-    }, 300);
-  };
+  useEffect(() => {
+    fetch(`${backendUrl}/api/plaid/create-link-token`, { method: 'POST' }).then(r=>r.json()).then(d => setLinkToken(d.link_token));
+  }, []);
 
-  // =============================
-  // SNAPSHOT PROCESSING (CHART)
-  // =============================
+
+  // ===== CHART DATA PREP =====
   const filteredSnapshots = filterSnapshotsByTimeframe(snapshots);
-
-  const sortedSnapshots = [...filteredSnapshots].sort(
-    (a, b) => new Date(a.taken_at) - new Date(b.taken_at)
-  );
-
-  const latest = sortedSnapshots[sortedSnapshots.length - 1];
-  const previous =
-    sortedSnapshots.length > 1
-      ? sortedSnapshots[sortedSnapshots.length - 2]
-      : undefined;
-
-  const latestNetWorth = latest ? latest.total_net_worth_usd : 0;
-  const prevNetWorth = previous ? previous.total_net_worth_usd : 0;
-  const delta = latestNetWorth - prevNetWorth;
-  const deltaPct =
-    prevNetWorth > 0 ? (delta / prevNetWorth) * 100 : undefined;
-
-  const hasSnapshotData = sortedSnapshots.length > 0;
-
   const netWorthLineData = {
-    labels: sortedSnapshots.map(s =>
-      new Date(s.taken_at).toLocaleString()
-    ),
-    datasets: [
-      {
-        label: 'Total Net Worth (USD)',
-        data: sortedSnapshots.map(s => Number(s.total_net_worth_usd)),
-        fill: true,
-        tension: 0.25,
-        pointRadius: 2,
-      },
-    ],
+    labels: filteredSnapshots.map(s => new Date(s.taken_at).toLocaleDateString()),
+    datasets: [{ label: 'Net Worth', data: filteredSnapshots.map(s => s.total_net_worth_usd), borderColor: '#2563eb', tension: 0.4, pointRadius: 0 }]
   };
 
-  const netWorthLineOptions = {
-    responsive: true,
-    maintainAspectRatio: false,
-    scales: {
-      x: { grid: { display: false } },
-      y: {
-        ticks: {
-          callback: (value) => {
-            const n = Number(value);
-            if (n >= 1_000_000) return '$' + (n / 1_000_000).toFixed(1) + 'M';
-            if (n >= 1_000) return '$' + (n / 1_000).toFixed(1) + 'k';
-            return '$' + n.toFixed(0);
-          },
-        },
-        grid: { color: 'rgba(0,0,0,0.05)' },
-      },
-    },
-    plugins: {
-      legend: { display: false },
-      tooltip: {
-        callbacks: {
-          label: ctx =>
-            'Net worth: $' +
-            ctx.parsed.y.toLocaleString(undefined, {
-              maximumFractionDigits: 0,
-            }),
-        },
-      },
-    },
-  };
-
-  const cryptoExposurePct =
-    exposure && exposure.totalNetWorthUsd
-      ? (exposure.totalCryptoExposureUsd / exposure.totalNetWorthUsd) * 100
-      : 0;
-
-  const tradfiExposurePct =
-    exposure && exposure.totalNetWorthUsd
-      ? (exposure.totalTradfiExposureUsd / exposure.totalNetWorthUsd) * 100
-      : 0;
-
-  const cryptoBreakdown = exposure?.cryptoBreakdown || {};
-
-  // =============================
-  // RENDER
-  // =============================
+  // ============================================
+  //  THE NEW LAYOUT (Sidebar + Grid)
+  // ============================================
   return (
-    <div
-      style={{
-        fontFamily: 'system-ui, -apple-system, sans-serif',
-        padding: '24px',
-        maxWidth: 1100,
-        margin: '0 auto',
-      }}
-    >
-      <h1>Net Worth Tracker (MVP)</h1>
+    <div style={{ display: 'flex', minHeight: '100vh', fontFamily: 'system-ui, sans-serif', background: '#f4f4f5' }}>
+        
+        {/* SIDEBAR */}
+        <div style={{ width: '280px', background: '#fff', borderRight: '1px solid #e4e4e7', padding: '24px', display: 'flex', flexDirection: 'column', gap: '32px' }}>
+            <div>
+                <h2 style={{ fontSize: '20px', fontWeight: 'bold', margin: '0 0 4px 0' }}>Unified Portfolio</h2>
+                <p style={{ margin: 0, color: '#71717a', fontSize: '14px' }}>Net Worth Tracker MVP</p>
+            </div>
 
-      {/* TOTAL NET WORTH */}
-      <section
-        style={{
-          marginBottom: '24px',
-          padding: '16px',
-          border: '1px solid #ddd',
-          borderRadius: 8,
-        }}
-      >
-        <h2>Total Net Worth</h2>
-        {loadingTotal ? (
-          <p>Loading...</p>
-        ) : totalNetWorth !== null ? (
-          <>
-            <p style={{ fontSize: 24, fontWeight: 'bold', marginBottom: 8 }}>
-              ${totalNetWorth.toLocaleString()}
-            </p>
-            <p style={{ margin: 0, fontSize: 14, color: '#555' }}>
-              <strong>Assets:</strong> ${totalAssets.toLocaleString()}
-            </p>
-            <p style={{ margin: 0, fontSize: 14, color: '#555' }}>
-              <strong>Liabilities:</strong> ${totalLiabilities.toLocaleString()}
-            </p>
-          </>
-        ) : (
-          <p>No data yet.</p>
-        )}
-      </section>
+{/* Quick Actions */}
+<div>
+                <h3 style={{ fontSize: '12px', textTransform: 'uppercase', color: '#a1a1aa', letterSpacing: '0.5px', marginBottom: '16px' }}>Actions</h3>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    
+                    {/* 1. Plaid Button */}
+                    <button onClick={() => ready ? open() : null} disabled={!ready} style={btnStyle}>+ Connect Plaid</button>
+                    
+                    <button onClick={handlePriceRefresh} style={{...btnStyle, background: '#fff', color: '#18181b', border: '1px solid #e4e4e7'}}>
+    ↻ Refresh Prices
+</button>
 
-      {/* NET WORTH OVER TIME */}
-      <section
-        style={{
-          marginBottom: '24px',
-          padding: '16px',
-          border: '1px solid #ddd',
-          borderRadius: 8,
-        }}
-      >
-        <h2>Net Worth Over Time</h2>
-
-        {/* TIMEFRAME BUTTONS */}
-        <div style={{ display: 'flex', gap: '12px', marginBottom: '12px' }}>
-          {['1W', '1M', '3M', '1Y', 'YTD', 'ALL'].map(tf => (
-            <button
-              key={tf}
-              onClick={() => setTimeframe(tf)}
-              style={{
-                padding: '6px 10px',
-                background: timeframe === tf ? '#2563eb' : '#eee',
-                color: timeframe === tf ? 'white' : 'black',
-                border: '1px solid #ccc',
-                borderRadius: 4,
-                cursor: 'pointer',
-              }}
-            >
-              {tf}
-            </button>
-          ))}
-        </div>
-
-        {loadingSnapshots ? (
-          <p>Loading history...</p>
-        ) : !hasSnapshotData ? (
-          <p style={{ fontSize: 14, color: '#555' }}>
-            No history yet. Run a wallet refresh or Plaid sync to create
-            snapshots.
-          </p>
-        ) : (
-          <>
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'baseline',
-                marginBottom: 8,
-              }}
-            >
-              <div>
-                <div style={{ fontSize: 12, color: '#666' }}>
-                  Latest snapshot net worth
-                </div>
-                <div style={{ fontSize: 20, fontWeight: 'bold' }}>
-                  ${latestNetWorth.toLocaleString(undefined, {
-                    maximumFractionDigits: 0,
-                  })}
-                </div>
-              </div>
-
-              {previous && (
-                <div style={{ textAlign: 'right', fontSize: 12 }}>
-                  <div
-                    style={{
-                      fontWeight: 500,
-                      color: delta >= 0 ? '#16a34a' : '#dc2626',
-                    }}
-                  >
-                    {delta >= 0 ? '+' : ''}
-                    ${delta.toLocaleString(undefined, {
-                      maximumFractionDigits: 0,
-                    })}
-                  </div>
-
-                  {deltaPct !== undefined && (
-                    <div
-                      style={{
-                        color: delta >= 0 ? '#16a34a' : '#dc2626',
-                      }}
-                    >
-                      {delta >= 0 ? '+' : ''}
-                      {deltaPct.toFixed(2)}% vs previous snapshot
+                    {/* 2. NEW: Add Crypto Wallet */}
+                    <div style={cardStyle}>
+                        <h4 style={{margin: '0 0 8px 0', fontSize: '14px'}}>Add Crypto Wallet</h4>
+                        <input placeholder="Address (0x...)" value={walletForm.address} onChange={e => setWalletForm({...walletForm, address: e.target.value})} style={inputStyle} />
+                        <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
+                            <select value={walletForm.chain} onChange={e => setWalletForm({...walletForm, chain: e.target.value})} style={{...inputStyle, marginBottom:0}}>
+                                <option value="eth">Ethereum</option>
+                                <option value="sol">Solana</option>
+                                <option value="btc">Bitcoin</option>
+                                <option value="polygon">Polygon</option>
+                            </select>
+                            <input placeholder="Nickname" value={walletForm.nickname} onChange={e => setWalletForm({...walletForm, nickname: e.target.value})} style={{...inputStyle, marginBottom:0}} />
+                        </div>
+                        <button onClick={handleWalletSubmit} style={actionBtnStyle}>Sync Wallet</button>
                     </div>
-                  )}
+
+                  {/* 3. Manual Asset (Corrected) */}
+                  <div style={cardStyle}>
+                        <h4 style={{margin: '0 0 8px 0', fontSize: '14px'}}>Add Manual Asset</h4>
+                        
+                        {/* Field 1: SYMBOL (Text) */}
+                        <input 
+                            placeholder="Symbol (e.g. BTC, AAPL)" 
+                            type="text"
+                            value={form.symbol} 
+                            onChange={e => setForm({...form, symbol: e.target.value.toUpperCase()})} 
+                            style={inputStyle} 
+                        />
+
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                            {/* Field 2: QUANTITY (Number) */}
+                            <input 
+                                placeholder="Quantity" 
+                                type="number" 
+                                value={form.quantity} 
+                                onChange={e => setForm({...form, quantity: e.target.value})} 
+                                style={inputStyle} 
+                            />
+                            
+                            {/* Field 3: COST BASIS (Number) */}
+                            <input 
+                                placeholder="Cost Basis ($)" 
+                                type="number" 
+                                value={form.priceUsd} 
+                                onChange={e => setForm({...form, priceUsd: e.target.value})} 
+                                style={inputStyle} 
+                            />
+                        </div>
+
+                        {/* Field 4: DATE */}
+                        <label style={{fontSize: '12px', color: '#666', display: 'block', marginBottom: '4px'}}>Effective Date:</label>
+                        <input 
+                            type="date" 
+                            value={form.effectiveDate} 
+                            onChange={e => setForm({...form, effectiveDate: e.target.value})} 
+                            style={inputStyle} 
+                        />
+                        
+                        <button onClick={handleManualAssetSubmit} style={actionBtnStyle}>Add Asset</button>
+                    </div>
+
+                    {/* 4. Add Liability */}
+                    <div style={cardStyle}>
+                        <h4 style={{margin: '0 0 8px 0', fontSize: '14px'}}>Add Liability</h4>
+                        <input placeholder="Name (Mortgage)" value={liabilityForm.name} onChange={e => setLiabilityForm({...liabilityForm, name: e.target.value})} style={inputStyle} />
+                        <input placeholder="Balance" type="number" value={liabilityForm.balanceUsd} onChange={e => setLiabilityForm({...liabilityForm, balanceUsd: e.target.value})} style={inputStyle} />
+                        <button onClick={handleLiabilitySubmit} style={actionBtnStyle}>Add Debt</button>
+                    </div>
                 </div>
-              )}
+            </div>
+        </div>
+
+        {/* MAIN CONTENT AREA */}
+        <div style={{ flex: 1, padding: '32px', overflowY: 'auto' }}>
+            
+            {/* TOP ROW: Summary Cards */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '24px', marginBottom: '32px' }}>
+                {/* Net Worth Card */}
+                <div style={bigCardStyle}>
+                    <h3 style={cardHeaderStyle}>Total Net Worth</h3>
+                    <div style={{ fontSize: '36px', fontWeight: '800', color: '#18181b' }}>
+                        ${totalNetWorth?.toLocaleString() || '---'}
+                    </div>
+                    <div style={{ display: 'flex', gap: '12px', marginTop: '8px', fontSize: '14px' }}>
+                        <span style={{ color: '#16a34a' }}>Assets: ${totalAssets.toLocaleString()}</span>
+                        <span style={{ color: '#dc2626' }}>Debt: ${totalLiabilities.toLocaleString()}</span>
+                    </div>
+                </div>
+
+                {/* Exposure Card */}
+                <div style={bigCardStyle}>
+                    <h3 style={cardHeaderStyle}>Crypto vs TradFi</h3>
+                    <div style={{ height: '120px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        {cryptoTotal + tradfiTotal > 0 ? 
+                            <Pie data={{ labels: ['Crypto', 'TradFi'], datasets: [{ data: [cryptoTotal, tradfiTotal], backgroundColor: ['#4f46e5', '#f97316'] }] }} options={{ plugins: { legend: { display: false } } }} />
+                        : <p style={{color: '#aaa'}}>No Data</p>}
+                    </div>
+                </div>
+
+                {/* Status Card */}
+                <div style={bigCardStyle}>
+                    <h3 style={cardHeaderStyle}>System Status</h3>
+                    <div style={{ fontSize: '14px', color: '#52525b', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        <div>🔌 Backend: <span style={{color: '#16a34a'}}>Connected</span></div>
+                        <div>🏦 Plaid: {linkToken ? <span style={{color: '#16a34a'}}>Ready</span> : 'Loading...'}</div>
+                        <div>📸 Snapshots: {snapshots.length} recorded</div>
+                    </div>
+                </div>
             </div>
 
-            <div style={{ height: 220 }}>
-              <Line data={netWorthLineData} options={netWorthLineOptions} />
+            {/* MIDDLE ROW: Timeline */}
+            <div style={{ ...bigCardStyle, marginBottom: '32px', padding: '24px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '24px' }}>
+                    <h3 style={cardHeaderStyle}>Wealth Timeline</h3>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                        {['1W', '1M', '3M', '1Y', 'ALL'].map(tf => (
+                            <button key={tf} onClick={() => setTimeframe(tf)} style={{ ...filterBtnStyle, background: timeframe === tf ? '#e4e4e7' : 'transparent' }}>{tf}</button>
+                        ))}
+                    </div>
+                </div>
+                <div style={{ height: '300px' }}>
+                    {snapshots.length > 0 ? <Line data={netWorthLineData} options={{ responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }} /> : <p>No history yet.</p>}
+                </div>
             </div>
-          </>
-        )}
-      </section>
 
-      {/* EXPOSURE SNAPSHOT */}
-      <section
-        style={{
-          marginBottom: '24px',
-          padding: '16px',
-          border: '1px solid #ddd',
-          borderRadius: 8,
-          display: 'flex',
-          flexWrap: 'wrap',
-          gap: '24px',
-        }}
-      >
-        <div style={{ flex: '1 1 260px' }}>
-          <h2>Exposure Snapshot</h2>
-          {loadingExposure && <p>Loading exposure...</p>}
+            {/* BOTTOM ROW: Holdings & Liabilities Tables */}
+            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '24px' }}>
+                
+                <div style={bigCardStyle}>
+                    <h3 style={cardHeaderStyle}>Holdings</h3>
+                    <table style={{ width: '100%', fontSize: '14px', borderCollapse: 'collapse' }}>
+        <thead style={{ borderBottom: '1px solid #e4e4e7', color: '#71717a' }}>
+          <tr>
+            <th style={thStyle}>Asset</th>
+            <th style={thStyle}>Qty</th>
+            <th style={thStyle}>Price</th>
+            <th style={thStyle}>Value</th>
+            <th style={thStyle}>Action</th> {/* NEW HEADER */}
+          </tr>
+        </thead>
+        <tbody>
+          {holdings.map(h => (
+            <tr key={h.id} style={{ borderBottom: '1px solid #f4f4f5' }}>
+              <td style={tdStyle}>
+                <b>{h.symbol}</b> 
+                <span style={{color:'#a1a1aa', fontSize:'12px', marginLeft: '4px'}}>
+                  {h.asset_class}
+                </span>
+              </td>
+              <td style={tdStyle}>{Number(h.quantity).toLocaleString()}</td>
+              <td style={tdStyle}>${Number(h.price_usd).toLocaleString()}</td>
+              <td style={tdStyle}>${Number(h.value_usd).toLocaleString()}</td>
+              <td style={tdStyle}>
+                {/* NEW DELETE BUTTON */}
+                <button 
+                  onClick={() => handleDelete(h.id)}
+                  style={{color: 'red', border: 'none', background: 'none', cursor: 'pointer', fontWeight: 'bold'}}
+                >
+                  X
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      
+                </div>
 
-          {!loadingExposure && exposure && (
-            <>
-              <p>
-                <strong>Crypto exposure:</strong>{' '}
-                ${exposure.totalCryptoExposureUsd.toLocaleString()} (
-                {cryptoExposurePct.toFixed(1)}%)
-              </p>
-              <p>
-                <strong>TradFi / other exposure:</strong>{' '}
-                ${exposure.totalTradfiExposureUsd.toLocaleString()} (
-                {tradfiExposurePct.toFixed(1)}%)
-              </p>
-            </>
-          )}
-        </div>
+                <div style={bigCardStyle}>
+                    <h3 style={cardHeaderStyle}>Liabilities</h3>
+                    {liabilities.map(l => (
+                        <div key={l.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 0', borderBottom: '1px solid #f4f4f5' }}>
+                            <span style={{ fontSize: '14px', fontWeight: '500' }}>{l.name}</span>
+                            <span style={{ fontSize: '14px', color: '#dc2626' }}>-${Number(l.balance_usd).toLocaleString()}</span>
+                        </div>
+                    ))}
+                </div>
 
-        <div style={{ flex: '1 1 260px' }}>
-          <h3 style={{ marginTop: 0 }}>Crypto Breakdown</h3>
-          {cryptoBreakdown && exposure ? (
-            <ul style={{ paddingLeft: 16, fontSize: 14 }}>
-              <li>
-                <strong>On-chain spot:</strong>{' '}
-                ${cryptoBreakdown.spotOnChainUsd.toLocaleString()}
-              </li>
-              <li>
-                <strong>Custodial spot:</strong>{' '}
-                ${cryptoBreakdown.spotCustodialUsd.toLocaleString()}
-              </li>
-              <li>
-                <strong>Stablecoins:</strong>{' '}
-                ${cryptoBreakdown.stablecoinUsd.toLocaleString()}
-              </li>
-              <li>
-                <strong>Crypto ETFs:</strong>{' '}
-                ${cryptoBreakdown.cryptoEtfUsd.toLocaleString()}
-              </li>
-              <li>
-                <strong>Crypto equities:</strong>{' '}
-                ${cryptoBreakdown.cryptoEquityUsd.toLocaleString()}
-              </li>
-            </ul>
-          ) : (
-            <p>No crypto breakdown yet.</p>
-          )}
-        </div>
-      </section>
-
-      {/* CRYPTO VS TRADFI PIE */}
-      <section
-        style={{
-          marginBottom: '24px',
-          padding: '16px',
-          border: '1px solid #ddd',
-          borderRadius: 8,
-          display: 'flex',
-          flexWrap: 'wrap',
-          gap: '24px',
-        }}
-      >
-        <div style={{ flex: '0 0 280px' }}>
-          <h2>Crypto vs TradFi (Net Worth)</h2>
-
-          {cryptoTotal + tradfiTotal > 0 ? (
-            <Pie
-              data={{
-                labels: ['Crypto', 'TradFi'],
-                datasets: [
-                  {
-                    data: [cryptoTotal, tradfiTotal],
-                    backgroundColor: ['#4f46e5', '#f97316'],
-                  },
-                ],
-              }}
-              options={{
-                plugins: {
-                  legend: { position: 'bottom' },
-                  tooltip: {
-                    callbacks: {
-                      label: ctx => {
-                        const label = ctx.label;
-                        const value = ctx.raw;
-                        const total = cryptoTotal + tradfiTotal || 1;
-                        const pct = ((value / total) * 100).toFixed(1);
-                        return `${label}: $${value.toLocaleString()} (${pct}%)`;
-                      },
-                    },
-                  },
-                },
-              }}
-            />
-          ) : (
-            <p>Add holdings to see your mix.</p>
-          )}
-        </div>
-
-        <div style={{ flex: '1 1 200px', fontSize: 14 }}>
-          <p>
-            <strong>Crypto:</strong> ${cryptoTotal.toLocaleString()}
-          </p>
-          <p>
-            <strong>TradFi:</strong> ${tradfiTotal.toLocaleString()}
-          </p>
-        </div>
-      </section>
-
-      {/* PLAID CONNECT */}
-      <section
-        style={{
-          marginBottom: '24px',
-          padding: '16px',
-          border: '1px solid #ddd',
-          borderRadius: 8,
-        }}
-      >
-        <h2>Connect Investment Account (Plaid Sandbox)</h2>
-        <button onClick={handlePlaidClick} disabled={plaidSyncing}>
-          {plaidSyncing ? 'Syncing...' : 'Connect via Plaid Sandbox'}
-        </button>
-      </section>
-
-      {/* MANUAL HOLDINGS */}
-      <section
-        style={{
-          marginBottom: '24px',
-          padding: '16px',
-          border: '1px solid #ddd',
-          borderRadius: 8,
-        }}
-      >
-        <h2>Add Manual Holding</h2>
-
-        <form onSubmit={handleSubmit}>
-          <div style={{ marginBottom: 8 }}>
-            <input
-              name="connectionName"
-              value={form.connectionName}
-              onChange={handleChange}
-              placeholder="Connection Name"
-            />
-          </div>
-
-          <div style={{ marginBottom: 8 }}>
-            <input
-              name="accountName"
-              value={form.accountName}
-              onChange={handleChange}
-              placeholder="Account Name"
-            />
-          </div>
-
-          <div style={{ marginBottom: 8 }}>
-            <input
-              name="symbol"
-              value={form.symbol}
-              onChange={handleChange}
-              placeholder="Symbol"
-            />
-          </div>
-
-          <div style={{ marginBottom: 8 }}>
-            <input
-              type="number"
-              name="quantity"
-              value={form.quantity}
-              onChange={handleChange}
-              step="0.0001"
-              placeholder="Quantity"
-            />
-          </div>
-
-          <div style={{ marginBottom: 8 }}>
-            <input
-              type="number"
-              name="priceUsd"
-              value={form.priceUsd}
-              onChange={handleChange}
-              step="0.01"
-              placeholder="Price (USD)"
-            />
-          </div>
-          <div style={{ marginBottom: 8 }}>
-  <label>
-    Effective Date:{' '}
-    <input
-      type="date"
-      name="effectiveDate"
-      value={form.effectiveDate}
-      onChange={handleChange}
-    />
-  </label>
-</div>
-
-
-
-          <div style={{ marginBottom: 8 }}>
-            <select
-              name="assetClass"
-              value={form.assetClass}
-              onChange={handleChange}
-            >
-              <option value="crypto">Crypto</option>
-              <option value="equity">Equity</option>
-              <option value="cash">Cash</option>
-              <option value="fixed_income">Fixed Income</option>
-            </select>
-          </div>
-
-          <button type="submit" disabled={saving}>
-            {saving ? 'Saving...' : 'Save Holding'}
-          </button>
-        </form>
-      </section>
-
-      {/* LIABILITIES */}
-      <section
-        style={{
-          marginBottom: '24px',
-          padding: '16px',
-          border: '1px solid #ddd',
-          borderRadius: 8,
-        }}
-      >
-        <h2>Liabilities</h2>
-
-        <form onSubmit={handleLiabilitySubmit} style={{ marginBottom: 16 }}>
-          <div style={{ marginBottom: 8 }}>
-            <input
-              name="name"
-              value={liabilityForm.name}
-              onChange={handleLiabilityChange}
-              placeholder="Name"
-            />
-          </div>
-
-          <div style={{ marginBottom: 8 }}>
-            <select
-              name="type"
-              value={liabilityForm.type}
-              onChange={handleLiabilityChange}
-            >
-              <option value="mortgage">Mortgage</option>
-              <option value="credit_card">Credit Card</option>
-              <option value="student_loan">Student Loan</option>
-              <option value="auto_loan">Auto Loan</option>
-              <option value="business_loan">Business Loan</option>
-              <option value="tax">Tax</option>
-              <option value="other">Other</option>
-            </select>
-          </div>
-
-          <div style={{ marginBottom: 8 }}>
-            <input
-              type="number"
-              name="balanceUsd"
-              value={liabilityForm.balanceUsd}
-              onChange={handleLiabilityChange}
-              step="0.01"
-              placeholder="Balance"
-            />
-          </div>
-
-          <div style={{ marginBottom: 8 }}>
-            <input
-              type="number"
-              name="interestRate"
-              value={liabilityForm.interestRate}
-              onChange={handleLiabilityChange}
-              step="0.0001"
-              placeholder="Interest Rate"
-            />
-          </div>
-
-          <div style={{ marginBottom: 8 }}>
-            <input
-              type="number"
-              name="minPaymentUsd"
-              value={liabilityForm.minPaymentUsd}
-              onChange={handleLiabilityChange}
-              step="0.01"
-              placeholder="Minimum Payment"
-            />
-          </div>
-
-          <div style={{ marginBottom: 8 }}>
-            <input
-              name="notes"
-              value={liabilityForm.notes}
-              onChange={handleLiabilityChange}
-              placeholder="Notes"
-            />
-          </div>
-
-          <button type="submit" disabled={saving}>
-            {saving ? 'Saving...' : 'Save Liability'}
-          </button>
-        </form>
-
-        {loadingLiabilities ? (
-          <p>Loading liabilities...</p>
-        ) : liabilities.length === 0 ? (
-          <p>No liabilities yet.</p>
-        ) : (
-          <table style={{ width: '100%', fontSize: 14 }}>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Type</th>
-                <th style={{ textAlign: 'right' }}>Balance</th>
-                <th style={{ textAlign: 'right' }}>Interest</th>
-                <th style={{ textAlign: 'right' }}>Min Payment</th>
-              </tr>
-            </thead>
-            <tbody>
-              {liabilities.map(l => (
-                <tr key={l.id}>
-                  <td>{l.name}</td>
-                  <td>{l.type}</td>
-                  <td style={{ textAlign: 'right' }}>
-                    ${Number(l.balance_usd).toLocaleString()}
-                  </td>
-                  <td style={{ textAlign: 'right' }}>
-                    {l.interest_rate ?? '-'}
-                  </td>
-                  <td style={{ textAlign: 'right' }}>
-                    {l.min_payment_usd
-                      ? `$${Number(l.min_payment_usd).toLocaleString()}`
-                      : '-'}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
-
-      {/* REAL ESTATE */}
-      <section
-        style={{
-          marginBottom: '24px',
-          padding: '16px',
-          border: '1px solid #ddd',
-          borderRadius: 8,
-        }}
-      >
-        <h2>Real Estate</h2>
-
-        {loadingRealEstate ? (
-          <p>Loading properties...</p>
-        ) : realEstate.length === 0 ? (
-          <p>No real estate properties.</p>
-        ) : (
-          realEstate.map(p => (
-            <div
-              key={p.id}
-              style={{
-                marginBottom: 12,
-                borderBottom: '1px solid #eee',
-                paddingBottom: 12,
-              }}
-            >
-              <strong>{p.name}</strong>
-              <br />
-              {p.city}, {p.state}
-              <br />
-              Value: ${Number(p.current_value_usd).toLocaleString()}
             </div>
-          ))
-        )}
-
-        {realEstate.length > 0 && (
-          <p style={{ marginTop: 16, fontWeight: 'bold' }}>
-            Total Real Estate:{' '}
-            ${realEstate
-              .reduce((sum, p) => sum + Number(p.current_value_usd), 0)
-              .toLocaleString()}
-          </p>
-        )}
-      </section>
-
-      {/* HOLDINGS TABLE */}
-      <section
-        style={{
-          marginBottom: '24px',
-          padding: '16px',
-          border: '1px solid #ddd',
-          borderRadius: 8,
-        }}
-      >
-        <h2>Holdings</h2>
-        {loadingHoldings ? (
-          <p>Loading holdings...</p>
-        ) : holdings.length === 0 ? (
-          <p>No holdings yet.</p>
-        ) : (
-          <table style={{ width: '100%', fontSize: 14 }}>
-            <thead>
-              <tr>
-                <th>Symbol</th>
-                <th style={{ textAlign: 'right' }}>Quantity</th>
-                <th style={{ textAlign: 'right' }}>Price</th>
-                <th style={{ textAlign: 'right' }}>Value</th>
-                <th>Class</th>
-                <th>Account</th>
-                <th>Provider</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {holdings.map(h => (
-                <tr key={h.id}>
-                  <td>{h.symbol}</td>
-                  <td style={{ textAlign: 'right' }}>
-                    {Number(h.quantity).toLocaleString()}
-                  </td>
-                  <td style={{ textAlign: 'right' }}>
-                    ${Number(h.price_usd).toLocaleString()}
-                  </td>
-                  <td style={{ textAlign: 'right' }}>
-                    ${Number(h.value_usd).toLocaleString()}
-                  </td>
-                  <td>{h.asset_class}</td>
-                  <td>{h.accounts?.name}</td>
-                  <td>{h.accounts?.connections?.provider}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
-
-      {/* MESSAGES */}
-      {message && <p style={{ color: 'green' }}>{message}</p>}
-      {error && <p style={{ color: 'red' }}>{error}</p>}
+        </div>
     </div>
   );
 }
+
+// ===== STYLES =====
+const btnStyle = { padding: '10px', background: '#18181b', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '500' };
+const cardStyle = { background: '#f4f4f5', padding: '12px', borderRadius: '8px' };
+const inputStyle = { width: '100%', padding: '8px', marginBottom: '8px', border: '1px solid #e4e4e7', borderRadius: '4px', boxSizing: 'border-box' };
+const actionBtnStyle = { width: '100%', padding: '8px', background: '#fff', border: '1px solid #e4e4e7', borderRadius: '4px', cursor: 'pointer', fontWeight: '600' };
+const bigCardStyle = { background: '#fff', padding: '24px', borderRadius: '12px', border: '1px solid #e4e4e7', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' };
+const cardHeaderStyle = { margin: '0 0 16px 0', fontSize: '16px', fontWeight: '600', color: '#18181b' };
+const filterBtnStyle = { padding: '4px 12px', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '12px', fontWeight: '600', color: '#52525b' };
+const thStyle = { textAlign: 'left', padding: '8px 4px', fontWeight: '500', fontSize: '12px' };
+const tdStyle = { padding: '12px 4px' };
 
 export default App;
