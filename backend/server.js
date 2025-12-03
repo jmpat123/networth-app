@@ -295,16 +295,47 @@ app.post('/api/realestate/manual', async (req, res) => {
 });
 
 // ====== HOLDINGS LIST ======
+// ====== HOLDINGS LIST (Updated to include Cost Basis & Grouping Info) ======
+// ====== HOLDINGS LIST (Final) ======
 app.get('/api/holdings/list', async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('holdings')
-      .select(`id, symbol, quantity, price_usd, value_usd, asset_class, as_of, accounts!inner(id, name, type, connections!inner(id, provider, user_id, nickname))`)
+      .select(`
+        id,
+        symbol,
+        quantity,
+        price_usd,
+        value_usd,
+        purchase_price_usd,
+        effective_date,      
+        asset_class,
+        as_of,
+        accounts!inner(
+          id,
+          name,
+          type,
+          connections!inner(
+            id,
+            provider,
+            nickname,
+            identifier
+          )
+        )
+      `)
       .eq('accounts.connections.user_id', TEST_USER_ID)
       .order('value_usd', { ascending: false });
-    if (error) return res.status(500).json({ error: error.message });
+
+    if (error) {
+        console.error("Holdings List Error:", error);
+        return res.status(500).json({ error: error.message });
+    }
+    
     res.json({ holdings: data || [] });
-  } catch (err) { res.status(500).json({ error: 'Server error' }); }
+  } catch (err) { 
+      console.error("Server Error in Holdings List:", err);
+      res.status(500).json({ error: 'Server error' }); 
+  }
 });
 
 // ====== DELETE HOLDING ======
